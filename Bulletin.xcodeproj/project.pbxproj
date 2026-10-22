@@ -400,6 +400,9 @@
 				DEVELOPMENT_TEAM = DB2H5XRWM3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSContactsUsageDescription = "Bulletin checks which of your contacts already use the app so you can see when friends are going to an event. Your address book never leaves this device.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "We use your location to show nearby micro events within your chosen radius.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "We need access to your photos so you can add banner images and pictures to events.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -432,6 +435,9 @@
 				DEVELOPMENT_TEAM = DB2H5XRWM3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSContactsUsageDescription = "Bulletin checks which of your contacts already use the app so you can see when friends are going to an event. Your address book never leaves this device.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "We use your location to show nearby micro events within your chosen radius.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "We need access to your photos so you can add banner images and pictures to events.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

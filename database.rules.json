@@ -1,0 +1,69 @@
+{
+  "rules": {
+    // 1) PUBLIC — event feed is readable by anyone (even logged out).
+    "events": {
+      ".read": true,
+      "$eventId": {
+        ".read": true,
+        // Create: data doesn't exist yet → any auth can write
+        // Update/delete: only the creator can edit
+        ".write": "auth != null && (!data.exists() || data.child('creatorUid').val() == auth.uid)",
+        ".validate": "newData.hasChildren(['title','address','dateText','timeText'])"
+      }
+    },
+
+    // 2) SEMI-PUBLIC — readable by any signed-in user, writable only by owner
+    "users": {
+      "$uid": {
+        "profile": {
+          ".read": "auth != null",
+          ".write": "auth != null && auth.uid == $uid"
+        },
+        "joinedEvents": {
+          ".read": "auth != null",
+          ".write": "auth != null && auth.uid == $uid"
+        },
+        "friends": {
+          ".read": "auth != null && auth.uid == $uid",
+          ".write": "auth != null && auth.uid == $uid"
+        },
+
+        // 3) PRIVATE — ONLY the owner can read/write
+        "private": {
+          ".read": "auth != null && auth.uid == $uid",
+          ".write": "auth != null && auth.uid == $uid",
+          ".validate": "newData.hasChildren() == false || newData.child('age').isNumber()"
+        },
+
+        // Fallback — prevent reading the whole /users/$uid blob unless owner
+        ".read": "auth != null && auth.uid == $uid",
+        ".write": "auth != null && auth.uid == $uid"
+      }
+    },
+
+    // 4) LOOKUP TABLES — signed-in reads, leaf-level owner writes
+    //    - directory: SHA-256(email) -> uid, used for private friend matching
+    //    - attendance: eventId -> uid, powers real "going" counts
+    "public": {
+      "directory": {
+        ".read": "auth != null",
+        "$emailHash": {
+          "$uid": {
+            ".write": "auth != null && auth.uid == $uid"
+          }
+        }
+      },
+      "attendance": {
+        ".read": "auth != null",
+        "$eventId": {
+          // The event owner can clear the whole attendance list when deleting
+          // the event. Individual users can only write or remove their entry.
+          ".write": "auth != null && root.child('events').child($eventId).child('creatorUid').val() == auth.uid",
+          "$uid": {
+            ".write": "auth != null && auth.uid == $uid"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,24 @@
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcscmblueprint
+*.xccheckout
+*.moved-aside
+
+# macOS
+.DS_Store
+
+# Swift Package Manager
+.swiftpm/
+.build/
+Package.resolved
+
+# Fastlane
+fastlane/report.xml
+fastlane/screenshots/
+fastlane/test_output/
+
+# Secrets (keep GoogleService-Info.plist only if the project is private)
+# *.plist
