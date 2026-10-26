@@ -526,7 +526,8 @@ struct ContentView: View {
                         } label: {
                             EventCardView(
                                 event: event,
-                                friendsGoing: friends.friendsGoing(to: event.id)
+                                friendsGoing: friends.friendsGoing(to: event.id),
+                                organizerFriend: friends.friend(uid: event.creatorUid)
                             )
                         }
                         .buttonStyle(.plain)

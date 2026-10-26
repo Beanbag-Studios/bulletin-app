@@ -260,9 +260,10 @@ final class FirebaseManager: ObservableObject {
             token: token
         )
 
-        // The organizer counts as going, so the public attendance list is
-        // complete from the moment the event is posted.
-        try? await setAttendance(eventID: event.id, attending: true)
+        // The organizer counts as going, so the public attendance list and the
+        // organizer's own joined list are complete from the moment the event is
+        // posted. Friends rely on that list to see who is attending.
+        try? await joinEvent(event)
     }
 
     func updateEvent(_ event: Event) async throws {
@@ -479,15 +480,39 @@ final class FirebaseManager: ObservableObject {
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 
-    /// Hashes a phone number so it can be compared without storing it. The
-    /// `phone:` prefix keeps phone hashes from ever colliding with email ones.
+    /// Every hash that should match a phone number, regardless of how it was
+    /// typed or saved in a contact. The same number commonly appears as
+    /// `+1 555 123 4567`, `(555) 123-4567`, `5551234567`, or `001 555…`; all of
+    /// those produce at least one shared hash.
     ///
     /// A client-side hash can still be enumerated offline by a determined
     /// attacker. If Bulletin moves to a backend, this should become a keyed
     /// server-side lookup.
-    nonisolated static func phoneHash(_ phone: String) -> String {
-        let normalized = normalizePhone(phone) ?? phone.filter(\.isNumber)
-        let digest = SHA256.hash(data: Data(("phone:" + normalized).utf8))
+    nonisolated static func phoneHashVariants(_ phone: String) -> Set<String> {
+        guard let normalized = normalizePhone(phone) else { return [] }
+        let digits = normalized.filter(\.isNumber)
+
+        var values = Set<String>([digits])
+        if digits.hasPrefix("00") {
+            values.insert(String(digits.dropFirst(2)))
+        }
+        if digits.hasPrefix("0") {
+            values.insert(String(digits.dropFirst()))
+        }
+
+        var hashes = Set<String>()
+        for value in values {
+            guard value.count >= 10 else { continue }
+            hashes.insert(phoneDigest(value))
+            if value.count > 10 {
+                hashes.insert(phoneDigest(String(value.suffix(10))))
+            }
+        }
+        return hashes
+    }
+
+    nonisolated private static func phoneDigest(_ digits: String) -> String {
+        let digest = SHA256.hash(data: Data(("phone:" + digits).utf8))
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 
@@ -540,8 +565,8 @@ final class FirebaseManager: ObservableObject {
            !email.isEmpty {
             hashes.insert(Self.emailHash(email))
         }
-        if let phone = profile?.phoneNumber, let normalized = Self.normalizePhone(phone) {
-            hashes.insert(Self.phoneHash(normalized))
+        if let phone = profile?.phoneNumber {
+            hashes.formUnion(Self.phoneHashVariants(phone))
         }
 
         for hash in hashes {
@@ -604,8 +629,11 @@ final class FirebaseManager: ObservableObject {
         }
 
         if let storedPhone, !storedPhone.isEmpty {
-            KeychainStore.set(storedPhone, for: StoreKey.phone(uid: uid))
-            profile = UserProfile(phoneNumber: storedPhone)
+            let normalized = Self.normalizePhone(storedPhone) ?? storedPhone
+            if normalized != storedPhone {
+                KeychainStore.set(normalized, for: StoreKey.phone(uid: uid))
+            }
+            profile = UserProfile(phoneNumber: normalized)
         } else {
             profile = nil
         }
@@ -632,10 +660,12 @@ final class FirebaseManager: ObservableObject {
         isProfileLoaded = true
 
         if let previous, previous != normalized, let token = await validToken() {
-            try? await deletePath(
-                "public/directory/\(Self.phoneHash(previous))/\(uid)",
-                token: token
-            )
+            for hash in Self.phoneHashVariants(previous) {
+                try? await deletePath(
+                    "public/directory/\(hash)/\(uid)",
+                    token: token
+                )
+            }
         }
 
         if publish {

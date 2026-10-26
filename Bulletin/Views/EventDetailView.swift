@@ -187,13 +187,17 @@ struct EventDetailView: View {
 
     private var organizerRow: some View {
         HStack(spacing: 12) {
-            ZStack {
-                Circle().fill(AppTheme.blueMatte).frame(width: 44, height: 44)
-                Text(event.organizerInitials)
-                    .font(.callout.weight(.bold))
-                    .foregroundStyle(.white)
+            if let organizerFriend = friends.friend(uid: event.creatorUid) {
+                FriendAvatarView(friend: organizerFriend, size: 44)
+            } else {
+                ZStack {
+                    Circle().fill(AppTheme.blueMatte).frame(width: 44, height: 44)
+                    Text(event.organizerInitials)
+                        .font(.callout.weight(.bold))
+                        .foregroundStyle(.white)
+                }
             }
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(event.organizerName)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(AppTheme.textPrimary)
@@ -204,6 +208,15 @@ struct EventDetailView: View {
                     Text(isOwner ? "You're the organizer" : "Event organizer")
                         .font(.caption)
                         .foregroundStyle(AppTheme.textSecondary)
+                }
+                if !isOwner, friends.friend(uid: event.creatorUid) != nil {
+                    Label("A friend organized this", systemImage: "star.fill")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(AppTheme.blueMatte)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(AppTheme.blueMatte.opacity(0.1), in: Capsule())
+                        .padding(.top, 2)
                 }
             }
             Spacer()
@@ -251,7 +264,7 @@ struct EventDetailView: View {
                         .font(.caption)
                         .foregroundStyle(AppTheme.textSecondary)
                 } else {
-                    let going = friends.friendsGoing(to: event.id)
+                    let going = friends.friendsForEvent(event)
                     if going.isEmpty {
                         Text("None of your contacts are going yet.")
                             .font(.caption)
@@ -359,7 +372,9 @@ struct EventDetailView: View {
     }
 
     private func friendRow(_ friend: ContactFriend) -> some View {
-        HStack(spacing: 10) {
+        let isOrganizer = friend.id == event.creatorUid
+
+        return HStack(spacing: 10) {
             FriendAvatarView(friend: friend, size: 34)
 
             VStack(alignment: .leading, spacing: 1) {
@@ -376,12 +391,15 @@ struct EventDetailView: View {
 
             Spacer()
 
-            Text("Going")
+            Text(isOrganizer ? "Organizer" : "Going")
                 .font(.caption2.weight(.semibold))
-                .foregroundStyle(AppTheme.blueMatte)
+                .foregroundStyle(isOrganizer ? .white : AppTheme.blueMatte)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
-                .background(AppTheme.blueMatte.opacity(0.1), in: Capsule())
+                .background(
+                    isOrganizer ? AppTheme.blueMatte : AppTheme.blueMatte.opacity(0.1),
+                    in: Capsule()
+                )
         }
         .padding(.vertical, 6)
     }

@@ -3,6 +3,7 @@ import SwiftUI
 struct EventCardView: View {
     let event: Event
     var friendsGoing: [ContactFriend] = []
+    var organizerFriend: ContactFriend? = nil
 
     private var friendsLabel: String {
         let names = friendsGoing.prefix(2).map(\.name)
@@ -74,6 +75,19 @@ struct EventCardView: View {
                         .foregroundStyle(AppTheme.textSecondary).padding(.horizontal, 8).padding(.vertical, 4)
                         .background(AppTheme.secondaryBG, in: Capsule())
                 }.padding(.top, 4)
+
+                if let organizerFriend {
+                    HStack(spacing: 6) {
+                        FriendAvatarView(friend: organizerFriend, size: 20)
+                        Text("\(organizerFriend.name) organized this")
+                            .font(.caption2.weight(.semibold))
+                            .lineLimit(1)
+                    }
+                    .foregroundStyle(AppTheme.blueMatte)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 4)
+                    .background(AppTheme.blueMatte.opacity(0.1), in: Capsule())
+                }
 
                 if !friendsGoing.isEmpty {
                     HStack(spacing: 7) {

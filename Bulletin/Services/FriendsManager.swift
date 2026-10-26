@@ -208,6 +208,29 @@ final class FriendsManager: ObservableObject {
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
+    /// The matched friend behind an event's creator, if the organizer is in the
+    /// device's contacts.
+    func friend(uid: String?) -> ContactFriend? {
+        guard let uid else { return nil }
+        return friends[uid]
+    }
+
+    func isOrganizerFriend(_ event: Event) -> Bool {
+        friend(uid: event.creatorUid) != nil
+    }
+
+    /// Everyone going plus the organizer. Including the organizer explicitly
+    /// means a friend still appears when their own joined list hasn't synced
+    /// yet (for example, right after they post an event).
+    func friendsForEvent(_ event: Event) -> [ContactFriend] {
+        var list = friendsGoing(to: event.id)
+        if let organizer = friend(uid: event.creatorUid),
+           !list.contains(where: { $0.id == organizer.id }) {
+            list.insert(organizer, at: 0)
+        }
+        return list
+    }
+
     // MARK: - Address book
 
     /// Reads contact names, email addresses, phone numbers, and thumbnails, and
@@ -253,11 +276,14 @@ final class FriendsManager: ObservableObject {
                     let raw = entry.value.stringValue
                     guard let normalized = FirebaseManager.normalizePhone(raw) else { continue }
 
-                    values.append((
-                        hash: FirebaseManager.phoneHash(normalized),
-                        email: nil,
-                        phone: FirebaseManager.formatPhone(normalized)
-                    ))
+                    let display = FirebaseManager.formatPhone(normalized)
+                    for hash in FirebaseManager.phoneHashVariants(normalized) {
+                        values.append((
+                            hash: hash,
+                            email: nil,
+                            phone: display
+                        ))
+                    }
                 }
 
                 for value in values {
