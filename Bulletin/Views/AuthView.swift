@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct AuthView: View {
     @Environment(\.dismiss) private var dismiss
@@ -7,6 +8,7 @@ struct AuthView: View {
     @State private var selectedPage = 0
     @State private var email = ""
     @State private var password = ""
+    @State private var phone = ""
     @State private var errorText: String?
     @State private var infoText: String?
     @State private var isLoading = false
@@ -48,6 +50,17 @@ struct AuthView: View {
                 if !isGate {
                     ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
                 }
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") {
+                        UIApplication.shared.sendAction(
+                            #selector(UIResponder.resignFirstResponder),
+                            to: nil,
+                            from: nil,
+                            for: nil
+                        )
+                    }
+                }
             }
         }
         .interactiveDismissDisabled(isGate && !fb.isSignedIn)
@@ -74,6 +87,7 @@ struct AuthView: View {
                 legalLinks
             }.padding(16)
         }
+        .scrollDismissesKeyboard(.interactively)
     }
 
     private var signUpPage: some View {
@@ -87,12 +101,13 @@ struct AuthView: View {
                 .frame(maxWidth: .infinity, minHeight: 44).padding(.vertical, 4)
                 .background(AppTheme.blueMatte, in: RoundedRectangle(cornerRadius: 12))
                 .foregroundStyle(.white).contentShape(RoundedRectangle(cornerRadius: 12)).buttonStyle(.plain)
-                .disabled(isLoading || email.isEmpty || password.count < 6)
+                .disabled(isLoading || email.isEmpty || password.count < 6 || FirebaseManager.normalizePhone(phone) == nil)
                 Button("Already have an account? Sign in") { withAnimation { selectedPage = 0 } }
                     .font(.caption.weight(.semibold)).foregroundStyle(AppTheme.blueMatte)
                 signUpLegalNotice
             }.padding(16)
         }
+        .scrollDismissesKeyboard(.interactively)
     }
 
     private var legalLinks: some View {
@@ -142,6 +157,24 @@ struct AuthView: View {
                 .textFieldStyle(.plain)
                 .padding(.horizontal, 12).padding(.vertical, 10)
                 .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+            if isSignUp {
+                TextField("Phone number (with area code)", text: $phone)
+                    .textContentType(.telephoneNumber)
+                    .keyboardType(.phonePad)
+                    .textFieldStyle(.plain)
+                    .padding(.horizontal, 12).padding(.vertical, 10)
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+                if !phone.isEmpty && FirebaseManager.normalizePhone(phone) == nil {
+                    Text("Include your area code, for example (555) 123-4567.")
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                Text("Your number is used privately to match you with contacts who use Bulletin. It is never shown to other people.")
+                    .font(.caption2)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if let errorText { Text(errorText).font(.caption).foregroundStyle(.red).multilineTextAlignment(.center) }
             if let infoText { Text(infoText).font(.caption).foregroundStyle(.green).multilineTextAlignment(.center) }
         }.padding(14).background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
@@ -163,9 +196,18 @@ struct AuthView: View {
     }
 
     private func doSignUp() async {
-        errorText = nil; infoText = nil; isLoading = true; defer { isLoading = false }
+        errorText = nil; infoText = nil
+        guard FirebaseManager.normalizePhone(phone) != nil else {
+            errorText = "Enter a valid phone number with its area code."
+            return
+        }
+        isLoading = true; defer { isLoading = false }
         do {
-            try await fb.signUp(email: email.trimmingCharacters(in: .whitespaces), password: password)
+            try await fb.signUp(
+                email: email.trimmingCharacters(in: .whitespaces),
+                password: password,
+                phoneNumber: phone
+            )
             infoText = "Account created"; try? await Task.sleep(nanoseconds: 300_000_000); dismiss()
         } catch {
             if error.localizedDescription.lowercased().contains("already in use") || error.localizedDescription.contains("email-already-in-use") {

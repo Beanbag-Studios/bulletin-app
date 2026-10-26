@@ -9,6 +9,13 @@ struct FirebaseRESTError: LocalizedError {
     var errorDescription: String? { message }
 }
 
+/// The signed-in user's private profile. The raw phone number stays in the
+/// iOS Keychain on the device; only a one-way hash is published for friend
+/// matching.
+struct UserProfile: Equatable {
+    var phoneNumber: String
+}
+
 // MARK: - Manager
 
 /// A dependency-free Firebase backend.
@@ -33,6 +40,21 @@ final class FirebaseManager: ObservableObject {
     @Published private(set) var uid: String?
     @Published private(set) var idToken: String?
 
+    /// Loaded from the Keychain (with a database fallback). Missing until
+    /// `loadProfile()` runs.
+    @Published private(set) var profile: UserProfile?
+    @Published private(set) var isProfileLoaded = false
+
+    var phoneNumber: String? {
+        profile?.phoneNumber
+    }
+
+    /// True only after a real profile fetch, so the app never flashes a prompt
+    /// while the session is still restoring.
+    var needsPhoneNumber: Bool {
+        isSignedIn && isProfileLoaded && (phoneNumber ?? "").isEmpty
+    }
+
     // MARK: Private state
 
     private var refreshToken: String?
@@ -48,6 +70,10 @@ final class FirebaseManager: ObservableObject {
         static let idToken = "bulletin.auth.idToken"
         static let refreshToken = "bulletin.auth.refreshToken"
         static let expiry = "bulletin.auth.expiry"
+
+        static func phone(uid: String) -> String {
+            "bulletin.profile.phone.\(uid)"
+        }
     }
 
     // MARK: Init
@@ -88,7 +114,7 @@ final class FirebaseManager: ObservableObject {
 
     // MARK: - Auth
 
-    func signUp(email: String, password: String) async throws {
+    func signUp(email: String, password: String, phoneNumber: String) async throws {
         let data = try await postIdentity(
             "signUp",
             body: ["email": email, "password": password, "returnSecureToken": true]
@@ -98,6 +124,9 @@ final class FirebaseManager: ObservableObject {
 
         // Best-effort profile bootstrap. Never block a successful sign-up on it.
         try? await writeProfile(email: email)
+        // The phone number is collected during sign-up so contacts can match
+        // this account from the very first launch.
+        try? await savePhoneNumber(phoneNumber, publish: false)
         await publishDirectoryEntry()
         await publishAttendanceForJoinedEvents()
     }
@@ -109,6 +138,7 @@ final class FirebaseManager: ObservableObject {
         )
         let payload = try decodeAuth(data)
         apply(payload, fallbackEmail: email)
+        await loadProfile()
         await publishDirectoryEntry()
         await publishAttendanceForJoinedEvents()
     }
@@ -120,6 +150,8 @@ final class FirebaseManager: ObservableObject {
         idToken = nil
         refreshToken = nil
         tokenExpiry = nil
+        profile = nil
+        isProfileLoaded = false
         clearSession()
     }
 
@@ -164,10 +196,13 @@ final class FirebaseManager: ObservableObject {
         // 3. The user's node (profile, joined events, private data).
         try await deletePath("users/\(uid)", token: token)
 
-        // 4. The reversed-hash directory entry used for friend matching.
-        if let email = userEmail, !email.isEmpty {
+        // 4. Every reversed-hash directory entry that points at this account.
+        //    Reading the directory also cleans up hashes left by a phone number
+        //    that was entered on a different device.
+        let directory = await fetchDirectory()
+        for (hash, uids) in directory where uids.contains(uid) {
             try await deletePath(
-                "public/directory/\(Self.emailHash(email))/\(uid)",
+                "public/directory/\(hash)/\(uid)",
                 token: token
             )
         }
@@ -175,6 +210,7 @@ final class FirebaseManager: ObservableObject {
         // 5. The Firebase Authentication record itself.
         _ = try await postIdentity("delete", body: ["idToken": token])
 
+        KeychainStore.delete(StoreKey.phone(uid: uid))
         signOut()
     }
 
@@ -433,33 +469,92 @@ final class FirebaseManager: ObservableObject {
 
     // MARK: - Contact matching directory
 
-    /// A private lookup table that lets a device match a contact's email to a
-    /// Bulletin account without uploading the address book. Only a SHA-256 hash
-    /// of the normalized email is stored.
+    /// A private lookup table that lets a device match a contact's email or
+    /// phone number to a Bulletin account without uploading the address book.
+    /// Only a SHA-256 hash of the normalized value is stored, never the value
+    /// itself.
     nonisolated static func emailHash(_ email: String) -> String {
         let normalized = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let digest = SHA256.hash(data: Data(normalized.utf8))
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 
-    /// Adds the signed-in account to the hash directory used for friend
-    /// matching. Safe to call repeatedly.
-    func publishDirectoryEntry() async {
-        guard let token = await validToken(),
-              let uid,
-              let email = userEmail?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
-              !email.isEmpty else {
-            return
-        }
-
-        try? await putRawJSON(
-            path: "public/directory/\(Self.emailHash(email))/\(uid)",
-            json: "true",
-            token: token
-        )
+    /// Hashes a phone number so it can be compared without storing it. The
+    /// `phone:` prefix keeps phone hashes from ever colliding with email ones.
+    ///
+    /// A client-side hash can still be enumerated offline by a determined
+    /// attacker. If Bulletin moves to a backend, this should become a keyed
+    /// server-side lookup.
+    nonisolated static func phoneHash(_ phone: String) -> String {
+        let normalized = normalizePhone(phone) ?? phone.filter(\.isNumber)
+        let digest = SHA256.hash(data: Data(("phone:" + normalized).utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
     }
 
-    /// Maps every hashed email in the directory to the account UIDs using it.
+    /// Normalizes a phone number to E.164-ish form so a contact's number and
+    /// an account's number produce the same hash. Numbers without a country
+    /// code are assumed to be North American (10 digits, or 11 starting with 1).
+    nonisolated static func normalizePhone(_ raw: String) -> String? {
+        var cleaned = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Drop extensions such as "x123" or "ext. 123".
+        cleaned = cleaned.replacingOccurrences(
+            of: "(?i)(?:ext\\.?|extension|x)\\s*\\d+\\s*$",
+            with: "",
+            options: .regularExpression
+        )
+
+        let digits = cleaned.filter(\.isNumber)
+
+        if cleaned.hasPrefix("+") {
+            guard digits.count >= 8 else { return nil }
+            return "+" + digits
+        }
+        guard digits.count >= 10 else { return nil }
+        if digits.count == 10 {
+            return "+1" + digits
+        }
+        if digits.count == 11 && digits.hasPrefix("1") {
+            return "+" + digits
+        }
+        return "+" + digits
+    }
+
+    /// Formats a stored E.164 North American number for display.
+    nonisolated static func formatPhone(_ phone: String) -> String {
+        let digits = phone.filter(\.isNumber)
+        guard phone.hasPrefix("+1"), digits.count == 11 else { return phone }
+        let area = digits.dropFirst().prefix(3)
+        let middle = digits.dropFirst(4).prefix(3)
+        let last = digits.dropFirst(7)
+        return "(\(area)) \(middle)-\(last)"
+    }
+
+    /// Adds the signed-in account to the hash directory used for friend
+    /// matching. Both the account email and, when present, the phone number are
+    /// published. Safe to call repeatedly.
+    func publishDirectoryEntry() async {
+        guard let token = await validToken(), let uid else { return }
+
+        var hashes = Set<String>()
+        if let email = userEmail?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+           !email.isEmpty {
+            hashes.insert(Self.emailHash(email))
+        }
+        if let phone = profile?.phoneNumber, let normalized = Self.normalizePhone(phone) {
+            hashes.insert(Self.phoneHash(normalized))
+        }
+
+        for hash in hashes {
+            try? await putRawJSON(
+                path: "public/directory/\(hash)/\(uid)",
+                json: "true",
+                token: token
+            )
+        }
+    }
+
+    /// Maps every hashed email or phone number in the directory to the account
+    /// UIDs using it.
     func fetchDirectory() async -> [String: [String]] {
         guard let token = await validToken(),
               let url = databaseURL(path: "public/directory", token: token) else {
@@ -480,6 +575,74 @@ final class FirebaseManager: ObservableObject {
 
     // MARK: - Profile
 
+    /// Loads the phone number used for friend matching. The raw number stays on
+    /// this device (Keychain); the database only ever receives a hash. A value
+    /// left by an older build under the owner-only private node is accepted as
+    /// a fallback.
+    func loadProfile() async {
+        guard isSignedIn,
+              let uid,
+              let token = await validToken() else {
+            profile = nil
+            isProfileLoaded = false
+            return
+        }
+
+        var storedPhone = KeychainStore.get(StoreKey.phone(uid: uid))
+
+        if storedPhone == nil {
+            storedPhone = await fetchValue(
+                path: "users/\(uid)/private/phoneNumber",
+                token: token
+            ) as? String
+        }
+        if storedPhone == nil {
+            storedPhone = await fetchValue(
+                path: "users/\(uid)/profile/phoneNumber",
+                token: token
+            ) as? String
+        }
+
+        if let storedPhone, !storedPhone.isEmpty {
+            KeychainStore.set(storedPhone, for: StoreKey.phone(uid: uid))
+            profile = UserProfile(phoneNumber: storedPhone)
+        } else {
+            profile = nil
+        }
+        isProfileLoaded = true
+    }
+
+    /// Saves a normalized phone number on this device and publishes its hash for
+    /// contact matching. Changing the number removes the old hash. The raw
+    /// number is never uploaded.
+    func savePhoneNumber(_ raw: String, publish: Bool = true) async throws {
+        guard let uid else {
+            throw FirebaseRESTError(message: "Sign in to save your phone number.")
+        }
+        guard let normalized = Self.normalizePhone(raw) else {
+            throw FirebaseRESTError(
+                message: "Enter a valid phone number with its area code."
+            )
+        }
+
+        let previous = profile?.phoneNumber
+        KeychainStore.set(normalized, for: StoreKey.phone(uid: uid))
+
+        profile = UserProfile(phoneNumber: normalized)
+        isProfileLoaded = true
+
+        if let previous, previous != normalized, let token = await validToken() {
+            try? await deletePath(
+                "public/directory/\(Self.phoneHash(previous))/\(uid)",
+                token: token
+            )
+        }
+
+        if publish {
+            await publishDirectoryEntry()
+        }
+    }
+
     private func writeProfile(email: String) async throws {
         guard let token = await validToken(), let uid else { return }
         try await write(
@@ -493,6 +656,16 @@ final class FirebaseManager: ObservableObject {
             ],
             token: token
         )
+    }
+
+    private func fetchValue(path: String, token: String) async -> Any? {
+        guard let url = databaseURL(path: path, token: token) else { return nil }
+        guard let (data, _) = try? await perform(URLRequest(url: url)),
+              let object = try? JSONSerialization.jsonObject(with: data),
+              !(object is NSNull) else {
+            return nil
+        }
+        return object
     }
 
     func savePrivateAge(_ age: Int) async throws {

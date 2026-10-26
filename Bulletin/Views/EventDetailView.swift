@@ -16,6 +16,7 @@ struct EventDetailView: View {
     @State private var isBusy = false
     @State private var showEdit = false
     @State private var showDeleteConfirm = false
+    @State private var friendsExpanded = false
     @State private var errorText: String?
 
     init(
@@ -256,9 +257,53 @@ struct EventDetailView: View {
                             .font(.caption)
                             .foregroundStyle(AppTheme.textSecondary)
                     } else {
-                        VStack(spacing: 10) {
-                            ForEach(going) { friend in
-                                friendRow(friend)
+                        VStack(spacing: 0) {
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.22)) {
+                                    friendsExpanded.toggle()
+                                }
+                            } label: {
+                                HStack(spacing: 12) {
+                                    FriendAvatarStack(friends: going, size: 40, maxVisible: 5)
+
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(
+                                            going.count == 1
+                                                ? "1 friend is going"
+                                                : "\(going.count) friends are going"
+                                        )
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(AppTheme.textPrimary)
+
+                                        Text(friendsExpanded ? "Hide the list" : "Tap the photos to see who")
+                                            .font(.caption)
+                                            .foregroundStyle(AppTheme.textSecondary)
+                                    }
+
+                                    Spacer(minLength: 4)
+
+                                    Image(systemName: "chevron.down")
+                                        .font(.caption.weight(.bold))
+                                        .foregroundStyle(AppTheme.textSecondary)
+                                        .rotationEffect(.degrees(friendsExpanded ? 180 : 0))
+                                }
+                                .padding(10)
+                                .background(AppTheme.secondaryBG, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            }
+                            .buttonStyle(.plain)
+
+                            if friendsExpanded {
+                                VStack(spacing: 0) {
+                                    ForEach(Array(going.enumerated()), id: \.element.id) { index, friend in
+                                        if index > 0 {
+                                            Divider().padding(.leading, 48)
+                                        }
+                                        friendRow(friend)
+                                    }
+                                }
+                                .padding(.top, 4)
+                                .transition(.opacity.combined(with: .move(edge: .top)))
                             }
                         }
 
@@ -271,6 +316,7 @@ struct EventDetailView: View {
                                     .foregroundStyle(AppTheme.blueMatte)
                             }
                             .disabled(isBusy)
+                            .padding(.top, 2)
                         }
                     }
                 }
@@ -280,7 +326,7 @@ struct EventDetailView: View {
 
     private var contactsPrompt: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("See which of your contacts are going. Bulletin matches email addresses on your device — your address book is never uploaded.")
+            Text("See which of your contacts are going. Bulletin matches email addresses and phone numbers on your device — your address book is never uploaded.")
                 .font(.caption)
                 .foregroundStyle(AppTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -314,23 +360,18 @@ struct EventDetailView: View {
 
     private func friendRow(_ friend: ContactFriend) -> some View {
         HStack(spacing: 10) {
-            ZStack {
-                Circle()
-                    .fill(AppTheme.blueMatte.opacity(0.14))
-                    .frame(width: 34, height: 34)
-                Text(friend.initials)
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(AppTheme.blueMatte)
-            }
+            FriendAvatarView(friend: friend, size: 34)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(friend.name)
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(AppTheme.textPrimary)
-                Text(friend.email)
-                    .font(.caption2)
-                    .foregroundStyle(AppTheme.textSecondary)
-                    .lineLimit(1)
+                if !friend.subtitle.isEmpty {
+                    Text(friend.subtitle)
+                        .font(.caption2)
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .lineLimit(1)
+                }
             }
 
             Spacer()
@@ -342,6 +383,7 @@ struct EventDetailView: View {
                 .padding(.vertical, 3)
                 .background(AppTheme.blueMatte.opacity(0.1), in: Capsule())
         }
+        .padding(.vertical, 6)
     }
 
     private func openSettings() {

@@ -1,9 +1,9 @@
 import Foundation
 import Security
 
-/// Small wrapper around the iOS Keychain for the auth tokens. Tokens are the
-/// only sensitive values stored outside of Firebase; everything else lives in
-/// UserDefaults.
+/// Small wrapper around the iOS Keychain for the auth tokens and the phone
+/// number used for contact matching. The raw phone number never goes to the
+/// backend; only a one-way hash is published.
 enum KeychainStore {
     private static let service = "com.beanllc.Bulletin.auth"
 

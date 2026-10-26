@@ -1,14 +1,17 @@
 import Foundation
 import Contacts
 import Combine
+import UIKit
 
-/// A friend is a phone contact whose email belongs to a Bulletin account.
-/// Names come from the local address book; Bulletins are matched by a one-way
-/// email hash so the address book never leaves the device.
+/// A friend is a phone contact whose email address or phone number belongs to a
+/// Bulletin account. Names and photos come from the local address book; matches
+/// are made with one-way hashes, so the address book never leaves the device.
 struct ContactFriend: Identifiable, Equatable {
     let id: String        // Firebase uid of the matched account
     let name: String
-    let email: String
+    let email: String?
+    let phone: String?
+    let imageData: Data?
 
     var initials: String {
         let letters = name
@@ -16,8 +19,39 @@ struct ContactFriend: Identifiable, Equatable {
             .prefix(2)
             .compactMap { $0.first }
         let result = String(letters).uppercased()
-        return result.isEmpty ? String(email.prefix(1)).uppercased() : result
+        if !result.isEmpty { return result }
+        return String((email ?? phone ?? "?").prefix(1)).uppercased()
     }
+
+    /// Email when the contact has one, otherwise their formatted phone number.
+    var subtitle: String {
+        email ?? phone ?? ""
+    }
+
+    var avatarImage: UIImage? {
+        imageData.flatMap(UIImage.init(data:))
+    }
+
+    func merging(_ candidate: ContactCandidate) -> ContactFriend {
+        ContactFriend(
+            id: id,
+            name: name.isEmpty ? candidate.name : name,
+            email: email ?? candidate.email,
+            phone: phone ?? candidate.phone,
+            imageData: imageData ?? candidate.imageData
+        )
+    }
+}
+
+/// One hash plus the local contact details needed to display a match. A contact
+/// with both an email and a phone produces two candidates; the display fields
+/// are merged after a match is found.
+struct ContactCandidate {
+    let hash: String
+    let name: String
+    let email: String?
+    let phone: String?
+    let imageData: Data?
 }
 
 /// Matches the device's contacts against registered accounts and tracks which
@@ -112,12 +146,18 @@ final class FriendsManager: ObservableObject {
         var matched: [String: ContactFriend] = [:]
         for candidate in contacts {
             guard let uids = directory[candidate.hash] else { continue }
-            for friendUID in uids where friendUID != uid && matched[friendUID] == nil {
-                matched[friendUID] = ContactFriend(
-                    id: friendUID,
-                    name: candidate.name,
-                    email: candidate.email
-                )
+            for friendUID in uids where friendUID != uid {
+                if let existing = matched[friendUID] {
+                    matched[friendUID] = existing.merging(candidate)
+                } else {
+                    matched[friendUID] = ContactFriend(
+                        id: friendUID,
+                        name: candidate.name,
+                        email: candidate.email,
+                        phone: candidate.phone,
+                        imageData: candidate.imageData
+                    )
+                }
             }
         }
 
@@ -170,18 +210,21 @@ final class FriendsManager: ObservableObject {
 
     // MARK: - Address book
 
-    /// Reads contact names and email addresses and hashes the emails. Runs off
-    /// the main actor because address books can be large.
-    nonisolated private static func matchingCandidates() -> [(hash: String, name: String, email: String)] {
+    /// Reads contact names, email addresses, phone numbers, and thumbnails, and
+    /// hashes the emails and numbers. Runs off the main actor because address
+    /// books can be large. Photos and names are only ever shown on this device.
+    nonisolated private static func matchingCandidates() -> [ContactCandidate] {
         let store = CNContactStore()
         let keys: [CNKeyDescriptor] = [
             CNContactGivenNameKey as CNKeyDescriptor,
             CNContactFamilyNameKey as CNKeyDescriptor,
-            CNContactEmailAddressesKey as CNKeyDescriptor
+            CNContactEmailAddressesKey as CNKeyDescriptor,
+            CNContactPhoneNumbersKey as CNKeyDescriptor,
+            CNContactThumbnailImageDataKey as CNKeyDescriptor
         ]
         let request = CNContactFetchRequest(keysToFetch: keys)
 
-        var candidates: [(hash: String, name: String, email: String)] = []
+        var candidates: [ContactCandidate] = []
         var seenHashes = Set<String>()
 
         do {
@@ -191,19 +234,42 @@ final class FriendsManager: ObservableObject {
                     .filter { !$0.isEmpty }
                     .joined(separator: " ")
 
+                var values: [(hash: String, email: String?, phone: String?)] = []
+
                 for entry in contact.emailAddresses {
                     let email = (entry.value as String)
                         .trimmingCharacters(in: .whitespacesAndNewlines)
                         .lowercased()
                     guard email.contains("@") else { continue }
 
-                    let hash = FirebaseManager.emailHash(email)
-                    guard seenHashes.insert(hash).inserted else { continue }
+                    values.append((
+                        hash: FirebaseManager.emailHash(email),
+                        email: email,
+                        phone: nil
+                    ))
+                }
 
-                    candidates.append((
-                        hash: hash,
-                        name: name.isEmpty ? email : name,
-                        email: email
+                for entry in contact.phoneNumbers {
+                    let raw = entry.value.stringValue
+                    guard let normalized = FirebaseManager.normalizePhone(raw) else { continue }
+
+                    values.append((
+                        hash: FirebaseManager.phoneHash(normalized),
+                        email: nil,
+                        phone: FirebaseManager.formatPhone(normalized)
+                    ))
+                }
+
+                for value in values {
+                    guard seenHashes.insert(value.hash).inserted else { continue }
+
+                    let fallback = value.email ?? value.phone ?? "Contact"
+                    candidates.append(ContactCandidate(
+                        hash: value.hash,
+                        name: name.isEmpty ? fallback : name,
+                        email: value.email,
+                        phone: value.phone,
+                        imageData: contact.thumbnailImageData
                     ))
                 }
             }

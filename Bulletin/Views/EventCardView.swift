@@ -76,12 +76,12 @@ struct EventCardView: View {
                 }.padding(.top, 4)
 
                 if !friendsGoing.isEmpty {
-                    HStack(spacing: 5) {
-                        Image(systemName: "person.2.fill")
-                            .font(.caption2)
+                    HStack(spacing: 7) {
+                        FriendAvatarStack(friends: friendsGoing, size: 24, maxVisible: 3)
                         Text(friendsLabel)
                             .font(.caption.weight(.semibold))
                             .lineLimit(1)
+                        Spacer(minLength: 0)
                     }
                     .foregroundStyle(AppTheme.blueMatte)
                     .padding(.horizontal, 8)

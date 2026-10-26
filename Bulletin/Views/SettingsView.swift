@@ -13,12 +13,15 @@ struct SettingsView: View {
 
     private enum SettingsSheet: Identifiable {
         case addLocation
+        case profilePhone
         case legal(LegalDocument)
 
         var id: String {
             switch self {
             case .addLocation:
                 return "addLocation"
+            case .profilePhone:
+                return "profilePhone"
             case .legal(let document):
                 return "legal-\(document.rawValue)"
             }
@@ -69,6 +72,18 @@ struct SettingsView: View {
                                 .foregroundStyle(AppTheme.textSecondary)
                         }
                     }
+
+                    Button {
+                        activeSheet = .profilePhone
+                    } label: {
+                        HStack {
+                            Label("Phone number", systemImage: "phone")
+                            Spacer()
+                            Text(fb.phoneNumber.map { FirebaseManager.formatPhone($0) } ?? "Add")
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
                 }
 
                 Section {
@@ -110,7 +125,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Friends")
                 } footer: {
-                    Text("Bulletin matches your contacts' email addresses on this device to show when friends are going. Your address book is never uploaded.")
+                    Text("Bulletin matches your contacts' email addresses and phone numbers on this device to show when friends are going. Your address book is never uploaded, and other people never see your number.")
                 }
 
                 Section("Saved Locations") {
@@ -241,6 +256,8 @@ struct SettingsView: View {
                     LocationPickerView { saved in
                         loc.addLocation(saved)
                     }
+                case .profilePhone:
+                    ProfileSetupView()
                 case .legal(let document):
                     LegalView(document: document)
                 }

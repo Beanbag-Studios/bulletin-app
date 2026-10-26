@@ -10,8 +10,8 @@ enum LegalConfig {
     static let operatorName = "Bulletin"
     static let supportEmail = "support@example.com"
 
-    static let effectiveDate = "October 22, 2026"
-    static let termsVersion = "2026-10-22"
+    static let effectiveDate = "October 26, 2026"
+    static let termsVersion = "2026-10-26"
     static let jurisdiction = "State of New York, United States"
 
     static var supportURL: URL? {

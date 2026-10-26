@@ -10,6 +10,7 @@ struct ProfileView: View {
     @State private var isLoadingStats = true
     @State private var showMyEvents = false
     @State private var showSettings = false
+    @State private var showProfileSetup = false
 
     private var initials: String {
         guard let email = fb.userEmail, let first = email.first else { return "U" }
@@ -38,6 +39,7 @@ struct ProfileView: View {
             }
             .sheet(isPresented: $showMyEvents) { MyEventsView() }
             .sheet(isPresented: $showSettings) { SettingsView() }
+            .sheet(isPresented: $showProfileSetup) { ProfileSetupView() }
             .task { await loadStats() }
             .onChange(of: fb.isSignedIn) { _, signedIn in
                 if !signedIn { dismiss() }
@@ -62,6 +64,11 @@ struct ProfileView: View {
                 .foregroundStyle(AppTheme.textPrimary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
+            if let phone = fb.phoneNumber {
+                Text(FirebaseManager.formatPhone(phone))
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
         }
         .padding(.top, 10)
     }
@@ -89,6 +96,13 @@ struct ProfileView: View {
 
     private var actions: some View {
         VStack(spacing: 10) {
+            rowButton(
+                icon: "phone",
+                title: fb.phoneNumber == nil ? "Add phone number" : "Phone number",
+                subtitle: fb.phoneNumber.map { FirebaseManager.formatPhone($0) } ?? "Private, used to match friends"
+            ) {
+                showProfileSetup = true
+            }
             rowButton(icon: "calendar.badge.plus", title: "My Events", subtitle: "Upcoming and past") {
                 showMyEvents = true
             }

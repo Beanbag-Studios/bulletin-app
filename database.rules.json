@@ -32,7 +32,9 @@
         "private": {
           ".read": "auth != null && auth.uid == $uid",
           ".write": "auth != null && auth.uid == $uid",
-          ".validate": "newData.hasChildren() == false || newData.child('age').isNumber()"
+          "age": {
+            ".validate": "newData.isNumber()"
+          }
         },
 
         // Fallback — prevent reading the whole /users/$uid blob unless owner
@@ -42,12 +44,12 @@
     },
 
     // 4) LOOKUP TABLES — signed-in reads, leaf-level owner writes
-    //    - directory: SHA-256(email) -> uid, used for private friend matching
+    //    - directory: SHA-256(email or phone) -> uid, used for private matching
     //    - attendance: eventId -> uid, powers real "going" counts
     "public": {
       "directory": {
         ".read": "auth != null",
-        "$emailHash": {
+        "$hash": {
           "$uid": {
             ".write": "auth != null && auth.uid == $uid"
           }

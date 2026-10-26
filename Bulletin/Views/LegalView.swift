@@ -139,7 +139,7 @@ private enum LegalText {
         LegalSection(
             heading: "Information you give us",
             paragraphs: [
-                "• Account information. We collect your email address and a Firebase user identifier when you create an account. Your password is sent directly to Firebase Authentication; we do not receive, see, or store it.",
+                "• Account information. We collect your email address and a Firebase user identifier when you create an account. Your password is sent directly to Firebase Authentication; we do not receive, see, or store it. Your phone number is stored only on your device and is never sent to us; only a one-way hash of it is published so contacts can match your account.",
                 "• Event content. When you post an event we collect the title, description, category, address, date and time, entry-fee setting, photos or banner image, and the organizer name shown on the event. Organizer names are derived from the part of your email before the @ symbol (for example, jane@example.com becomes \"jane\").",
                 "• Public event information. Event pages, including the event address and photos, are public to people using Bulletin, including people who are not signed in. Do not post anything in an event that you do not want to be public.",
                 "• Support messages. If you email us, we receive your email address and the contents of your message so we can respond."
@@ -149,7 +149,7 @@ private enum LegalText {
             heading: "Device features you choose to use",
             paragraphs: [
                 "• Location. With your permission, Bulletin uses your precise location to center the feed and find nearby events. Location is processed on your device for searching and filtering. Saved locations are stored locally on your device, not in our database. If you post an event, the address you enter is public.",
-                "• Contacts. With your permission, Bulletin reads names and email addresses from your contacts on your device. It computes a one-way SHA-256 hash of each email address and compares those hashes locally against a lookup table of hashed account emails that it downloads. We do not receive your address book, contact names, phone numbers, or the raw email addresses in it. The friend names and email addresses shown in the app are matched on your device. To let your contacts find you, Bulletin publishes a SHA-256 hash of your own account email (never the email itself) to that lookup table.",
+                "• Contacts. With your permission, Bulletin reads names, email addresses, phone numbers, and contact photos from your contacts on your device. It computes a one-way SHA-256 hash of each email address and phone number and compares those hashes locally against a lookup table of hashed account values that it downloads. We do not receive your address book, contact names, contact photos, or the raw email addresses and phone numbers in it. The friend names, phone numbers, and photos shown in the app are matched and displayed on your device. To let your contacts find you, Bulletin publishes a SHA-256 hash of your own account email and phone number (never the raw values) to that lookup table.",
                 "• Photos. If you add a banner or pictures to an event, Bulletin receives the images you select and stores them with that public event.",
                 "• You can change or revoke location and contacts access at any time in iOS Settings. Revoking a permission does not delete information already posted."
             ]
@@ -188,14 +188,14 @@ private enum LegalText {
         LegalSection(
             heading: "Data retention",
             paragraphs: [
-                "We keep account information while your account exists. Events stay in the database until you delete them, until we remove them for a policy or safety reason, or until your account is deleted. RSVPs stay until you leave the event or delete your account. Support messages are kept only as long as needed to respond and for reasonable recordkeeping.",
-                "When you use Delete Account in Settings, we delete your profile, hosted events, RSVPs, and contact-directory entry, and then delete your Firebase Authentication record. Some residual copies may remain in backups or logs for a limited period before they are overwritten. We may retain limited information when the law requires it or to resolve disputes and prevent abuse."
+                "We keep account information while your account exists. The phone number you enter stays in the iOS Keychain on your device until you change it or delete your account. Events stay in the database until you delete them, until we remove them for a policy or safety reason, or until your account is deleted. RSVPs stay until you leave the event or delete your account. Support messages are kept only as long as needed to respond and for reasonable recordkeeping.",
+                "When you use Delete Account in Settings, we delete your profile, hosted events, RSVPs, and contact-directory hashes, and then delete your Firebase Authentication record. The phone number is removed from this device. Some residual copies may remain in backups or logs for a limited period before they are overwritten. We may retain limited information when the law requires it or to resolve disputes and prevent abuse."
             ]
         ),
         LegalSection(
             heading: "Security",
             paragraphs: [
-                "Data travels over encrypted HTTPS connections. Firebase security rules restrict access to user records, auth tokens are stored in the iOS Keychain, and contact emails used for friend matching are hashed on the device. No method of transmission or storage is completely secure, so we cannot guarantee absolute security.",
+                "Data travels over encrypted HTTPS connections. Firebase security rules restrict access to user records, auth tokens are stored in the iOS Keychain, and contact emails and phone numbers used for friend matching are hashed on the device. No method of transmission or storage is completely secure, so we cannot guarantee absolute security.",
                 "If we become aware of a breach affecting your personal information, we will notify you and the relevant authorities as required by applicable law."
             ]
         ),
@@ -299,7 +299,7 @@ private enum LegalText {
         LegalSection(
             heading: "Location, contacts, and permissions",
             paragraphs: [
-                "Some features ask for access to your location or contacts. These permissions are optional, and you can change them in iOS Settings. If you grant contacts access, Bulletin matches hashed email addresses on your device as described in the Privacy Policy. If you grant location access, Bulletin uses your location to find nearby events. You are responsible for the addresses you post and for respecting other people's privacy."
+                "Some features ask for access to your location or contacts. These permissions are optional, and you can change them in iOS Settings. If you grant contacts access, Bulletin matches hashed email addresses and phone numbers on your device as described in the Privacy Policy. If you grant location access, Bulletin uses your location to find nearby events. You are responsible for the addresses you post and for respecting other people's privacy."
             ]
         ),
         LegalSection(

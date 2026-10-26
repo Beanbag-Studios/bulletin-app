@@ -20,6 +20,7 @@ struct ContentView: View {
     @State private var showLocationPicker = false
     @State private var showFilters = false
     @State private var showProfile = false
+    @State private var showProfileSetup = false
     @State private var events: [Event] = []
     @State private var resolvedCoordinates: [UUID: CLLocationCoordinate2D] = [:]
     @State private var isLoading = true
@@ -162,26 +163,39 @@ struct ContentView: View {
                 }
                 .sheet(isPresented: $showFilters) { FilterSheetView(options: $filterOptions) }
                 .sheet(isPresented: $showProfile) { ProfileView() }
+                .sheet(isPresented: $showProfileSetup) { ProfileSetupView() }
                 .onAppear {
                     if !showSplash { showGate = !fb.isSignedIn }
                 }
                 .onChange(of: fb.isSignedIn) { _, signedIn in
                     if !showSplash { showGate = !signedIn }
                     if signedIn {
-                        Task { await loadEvents() }
-                        Task { await friends.refresh(force: true) }
+                        Task {
+                            await fb.loadProfile()
+                            await loadEvents()
+                            await friends.refresh(force: true)
+                            if fb.needsPhoneNumber {
+                                try? await Task.sleep(nanoseconds: 700_000_000)
+                                showProfileSetup = true
+                            }
+                        }
                     } else {
                         friends.reset()
+                        showProfileSetup = false
                     }
                 }
                 .task {
                     if let saved = loc.selectedLocation {
                         filterOptions.radiusMiles = saved.radiusMiles
                     }
+                    await fb.loadProfile()
                     await fb.publishAttendanceForJoinedEvents()
                     await loadEvents()
                     await fb.publishDirectoryEntry()
                     await friends.refresh()
+                    if fb.needsPhoneNumber {
+                        showProfileSetup = true
+                    }
                     if loc.authorization == .authorizedWhenInUse || loc.authorization == .authorizedAlways {
                         loc.requestCurrentLocation()
                     }
@@ -541,7 +555,7 @@ struct ContentView: View {
                 Text("See which friends are going")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(AppTheme.textPrimary)
-                Text("Match your contacts privately to spot events friends already joined.")
+                Text("Match contacts by email or phone to spot events friends already joined.")
                     .font(.caption2)
                     .foregroundStyle(AppTheme.textSecondary)
                     .lineLimit(2)
