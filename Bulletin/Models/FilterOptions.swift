@@ -1,7 +1,7 @@
 import Foundation
 import CoreLocation
 
-struct FilterOptions {
+struct FilterOptions: Equatable {
 
     enum LocationSource: String, CaseIterable, Identifiable {
         case myLocation = "My Location"

@@ -71,6 +71,9 @@ final class FriendsManager: ObservableObject {
     private var lastUpdated: Date?
     private let refreshInterval: TimeInterval = 60
     private let maxFriends = 150
+    /// What we last sent to the server, so routine refreshes do not rewrite the
+    /// same subscription map every minute.
+    private var publishedSubscriptionUIDs: Set<String>?
 
     var hasAccess: Bool {
         authorization == .authorized || authorization == .limited
@@ -119,7 +122,16 @@ final class FriendsManager: ObservableObject {
     func refresh(force: Bool = false) async {
         authorization = CNContactStore.authorizationStatus(for: .contacts)
 
-        guard hasAccess, !isLoading else { return }
+        guard hasAccess else {
+            // If access was revoked, stop friend-event notifications rather
+            // than leaving stale subscriptions on the server.
+            if publishedSubscriptionUIDs != [] {
+                await FirebaseManager.shared.publishFriendSubscriptions([])
+                publishedSubscriptionUIDs = []
+            }
+            return
+        }
+        guard !isLoading else { return }
         guard let uid = FirebaseManager.shared.uid else { return }
         if !force, let lastUpdated, Date().timeIntervalSince(lastUpdated) < refreshInterval {
             return
@@ -138,6 +150,10 @@ final class FriendsManager: ObservableObject {
             friends = [:]
             joinedEventIDsByUID = [:]
             lastUpdated = Date()
+            if publishedSubscriptionUIDs != [] {
+                await FirebaseManager.shared.publishFriendSubscriptions([])
+                publishedSubscriptionUIDs = []
+            }
             return
         }
 
@@ -188,6 +204,12 @@ final class FriendsManager: ObservableObject {
         joinedEventIDsByUID = attendance
         lastUpdated = Date()
         errorText = nil
+
+        let subscriptions = Set(limited.keys)
+        if publishedSubscriptionUIDs != subscriptions {
+            await FirebaseManager.shared.publishFriendSubscriptions(subscriptions)
+            publishedSubscriptionUIDs = subscriptions
+        }
     }
 
     /// Drops cached matches — used on sign-out and when access is revoked.
@@ -196,6 +218,7 @@ final class FriendsManager: ObservableObject {
         joinedEventIDsByUID = [:]
         lastUpdated = nil
         errorText = nil
+        publishedSubscriptionUIDs = nil
         authorization = CNContactStore.authorizationStatus(for: .contacts)
     }
 

@@ -30,7 +30,9 @@ struct ContentView: View {
     @StateObject private var fb = FirebaseManager.shared
     @StateObject private var loc = LocationManager.shared
     @StateObject private var friends = FriendsManager.shared
+    @StateObject private var notifications = NotificationManager.shared
     @State private var filterOptions = FilterOptions()
+    @State private var lastSyncedNotificationArea: String?
     @AppStorage("bulletin.friends.bannerDismissed") private var friendsBannerDismissed = false
     @FocusState private var searchFocused: Bool
 
@@ -89,6 +91,16 @@ struct ContentView: View {
 
     private var searchCollapse: CGFloat {
         max(0, min(1, -scrollOffset / 60))
+    }
+
+    /// Changes whenever the center or radius used for distance filtering
+    /// changes. Used to keep the server-side notification area in sync without
+    /// writing on every GPS tick.
+    private var locationSyncKey: String {
+        let lat = origin.map { String(format: "%.3f", $0.latitude) } ?? "none"
+        let lon = origin.map { String(format: "%.3f", $0.longitude) } ?? "none"
+        let saved = filterOptions.selectedSavedLocationId?.uuidString ?? "none"
+        return "\(filterOptions.locationSource.rawValue)|\(saved)|\(lat)|\(lon)|\(filterOptions.radiusMiles)"
     }
 
     // MARK: - Body
@@ -172,8 +184,11 @@ struct ContentView: View {
                     if signedIn {
                         Task {
                             await fb.loadProfile()
+                            notifications.syncTokenWithAccount()
                             await loadEvents()
                             await friends.refresh(force: true)
+                            await syncNotificationArea()
+                            await handlePendingNotification()
                             if fb.needsPhoneNumber {
                                 try? await Task.sleep(nanoseconds: 700_000_000)
                                 showProfileSetup = true
@@ -193,6 +208,9 @@ struct ContentView: View {
                     await loadEvents()
                     await fb.publishDirectoryEntry()
                     await friends.refresh()
+                    notifications.syncTokenWithAccount()
+                    await syncNotificationArea()
+                    await handlePendingNotification()
                     if fb.needsPhoneNumber {
                         showProfileSetup = true
                     }
@@ -200,12 +218,28 @@ struct ContentView: View {
                         loc.requestCurrentLocation()
                     }
                 }
+                .onChange(of: notifications.pendingEventID) { _, _ in
+                    Task { await handlePendingNotification() }
+                }
+                .onChange(of: filterOptions) { _, _ in
+                    Task { await syncNotificationArea() }
+                }
+                .onChange(of: locationSyncKey) { _, _ in
+                    Task { await syncNotificationArea() }
+                }
             }
             .onAppear { UIScrollView.appearance().bounces = false }
             .preferredColorScheme(.dark)
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active {
-                    Task { await friends.refresh() }
+                    Task {
+                        await notifications.refreshStatus()
+                        notifications.syncTokenWithAccount()
+                        notifications.clearBadge()
+                        await friends.refresh()
+                        await syncNotificationArea()
+                        await handlePendingNotification()
+                    }
                 }
             }
             .onTapGesture { searchFocused = false }
@@ -215,6 +249,12 @@ struct ContentView: View {
                     withAnimation(.easeInOut(duration: 0.35)) {
                         showSplash = false
                         showGate = !fb.isSignedIn
+                    }
+                    // Ask after the splash so the system prompt has context and
+                    // does not appear over the launch animation.
+                    Task {
+                        await notifications.requestAuthorizationIfNeeded()
+                        notifications.syncTokenWithAccount()
                     }
                 }
                 .transition(.opacity)
@@ -658,6 +698,66 @@ struct ContentView: View {
         for event in missing.prefix(25) {
             guard let coordinate = await loc.coordinate(for: event.address) else { continue }
             resolvedCoordinates[event.id] = coordinate
+        }
+    }
+
+    /// Keeps the server's copy of the selected search area in sync. The push
+    /// sender uses it to apply the same "nearby" rule as the feed.
+    private func syncNotificationArea() async {
+        guard fb.isSignedIn else { return }
+
+        if filterOptions.locationSource == .anywhere {
+            let key = "anywhere|\(filterOptions.radiusMiles)"
+            guard key != lastSyncedNotificationArea else { return }
+            lastSyncedNotificationArea = key
+            await fb.saveNotificationArea(
+                latitude: nil,
+                longitude: nil,
+                radiusMiles: filterOptions.radiusMiles
+            )
+            return
+        }
+
+        guard let origin else { return }
+        let key = locationSyncKey
+        guard key != lastSyncedNotificationArea else { return }
+        lastSyncedNotificationArea = key
+
+        await fb.saveNotificationArea(
+            latitude: origin.latitude,
+            longitude: origin.longitude,
+            radiusMiles: filterOptions.radiusMiles
+        )
+    }
+
+    /// Opens the event behind a notification tap. If the event is not in the
+    /// feed yet (cold launch, filter, or a past event), fetch it directly.
+    private func handlePendingNotification() async {
+        guard fb.isSignedIn,
+              let eventID = notifications.pendingEventID,
+              let uuid = UUID(uuidString: eventID) else {
+            return
+        }
+
+        if let event = events.first(where: { $0.id == uuid }) {
+            notifications.consumePendingEventID()
+            selectedEvent = event
+            return
+        }
+
+        do {
+            if let event = try await fb.fetchEvent(id: uuid) {
+                if !events.contains(where: { $0.id == event.id }) {
+                    events.insert(event, at: 0)
+                }
+                notifications.consumePendingEventID()
+                selectedEvent = event
+            } else {
+                // The event was deleted or is otherwise unavailable.
+                notifications.consumePendingEventID()
+            }
+        } catch {
+            // Keep the pending ID so a later foreground refresh can retry.
         }
     }
 }

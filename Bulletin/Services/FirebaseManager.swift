@@ -144,6 +144,28 @@ final class FirebaseManager: ObservableObject {
     }
 
     func signOut() {
+        // Best-effort cleanup before the session is cleared. Subscriptions and
+        // push tokens must not keep delivering alerts after someone signs out.
+        if let uid, let token = idToken {
+            let pushToken = NotificationManager.shared.deviceToken
+            Task {
+                try? await self.deletePath(
+                    "public/friendSubscriptions/\(uid)",
+                    token: token
+                )
+                try? await self.deletePath(
+                    "users/\(uid)/notificationArea",
+                    token: token
+                )
+                if let pushToken {
+                    try? await self.deletePath(
+                        "users/\(uid)/pushTokens/\(pushToken)",
+                        token: token
+                    )
+                }
+            }
+        }
+
         isSignedIn = false
         userEmail = nil
         uid = nil
@@ -193,8 +215,11 @@ final class FirebaseManager: ObservableObject {
             )
         }
 
-        // 3. The user's node (profile, joined events, private data).
+        // 3. The user's node (profile, joined events, private data, push
+        //    tokens, and notification area) plus the friend-notification
+        //    subscription list.
         try await deletePath("users/\(uid)", token: token)
+        try await deletePath("public/friendSubscriptions/\(uid)", token: token)
 
         // 4. Every reversed-hash directory entry that points at this account.
         //    Reading the directory also cleans up hashes left by a phone number
@@ -236,6 +261,25 @@ final class FirebaseManager: ObservableObject {
             if let event = Event.fromDict(record) { events.append(event) }
         }
         return events.sorted { $0.eventDate < $1.eventDate }
+    }
+
+    /// A single event, used when a notification opens an event that is not in
+    /// the feed yet (for example on a cold launch).
+    func fetchEvent(id: UUID) async throws -> Event? {
+        let token = await validToken()
+        guard let url = databaseURL(
+            path: "events/\(id.uuidString)",
+            token: token
+        ) else {
+            throw FirebaseRESTError(message: "The database URL is invalid.")
+        }
+
+        let (data, _) = try await perform(URLRequest(url: url))
+        guard var record = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            return nil
+        }
+        if record["id"] == nil { record["id"] = id.uuidString }
+        return Event.fromDict(record)
     }
 
     /// Events created by a specific user.
@@ -304,6 +348,104 @@ final class FirebaseManager: ObservableObject {
         var request = URLRequest(url: url)
         request.httpMethod = "DELETE"
         _ = try await perform(request)
+    }
+
+    // MARK: - Push notifications
+
+    /// Stores this device's APNs token under the signed-in account. A person
+    /// can have more than one device, so tokens are keyed by the token itself.
+    /// The token is removed on sign-out and when APNs reports it as invalid.
+    func registerPushToken(_ deviceToken: String, environment: String) async {
+        guard let authToken = await validToken(), let uid else { return }
+        guard !deviceToken.isEmpty else { return }
+
+        let payload: [String: Any] = [
+            "token": deviceToken,
+            "environment": environment,
+            "platform": "ios",
+            "updatedAt": Date().timeIntervalSince1970 * 1000
+        ]
+
+        try? await write(
+            path: "users/\(uid)/pushTokens/\(deviceToken)",
+            method: "PUT",
+            payload: payload,
+            token: authToken
+        )
+    }
+
+    func unregisterPushToken(_ deviceToken: String) async {
+        guard let authToken = await validToken(), let uid else { return }
+        guard !deviceToken.isEmpty else { return }
+        try? await deletePath(
+            "users/\(uid)/pushTokens/\(deviceToken)",
+            token: authToken
+        )
+    }
+
+    /// Publishes the account IDs of friends this person matched from their
+    /// address book. The server uses the reverse lookup to decide whose devices
+    /// should receive an alert when one of those friends posts an event.
+    ///
+    /// Only account IDs are uploaded — never names, phone numbers, emails, or
+    /// contact photos. Replacing the whole node also removes friends who are no
+    /// longer matched.
+    func publishFriendSubscriptions(_ friendUIDs: Set<String>) async {
+        guard let authToken = await validToken(), let uid else { return }
+
+        guard !friendUIDs.isEmpty else {
+            try? await deletePath(
+                "public/friendSubscriptions/\(uid)",
+                token: authToken
+            )
+            return
+        }
+
+        var payload: [String: Any] = [:]
+        for friendUID in friendUIDs {
+            payload[friendUID] = true
+        }
+
+        try? await write(
+            path: "public/friendSubscriptions/\(uid)",
+            method: "PUT",
+            payload: payload,
+            token: authToken
+        )
+    }
+
+    /// Saves the person's current search center and radius so the server can
+    /// apply the same distance rule to push notifications. Passing `nil`
+    /// coordinates (the "Anywhere" filter) removes the area and allows alerts
+    /// for all matched friends.
+    func saveNotificationArea(
+        latitude: Double?,
+        longitude: Double?,
+        radiusMiles: Double
+    ) async {
+        guard let authToken = await validToken(), let uid else { return }
+
+        guard let latitude, let longitude else {
+            try? await deletePath(
+                "users/\(uid)/notificationArea",
+                token: authToken
+            )
+            return
+        }
+
+        let payload: [String: Any] = [
+            "latitude": latitude,
+            "longitude": longitude,
+            "radiusMiles": radiusMiles,
+            "updatedAt": Date().timeIntervalSince1970 * 1000
+        ]
+
+        try? await write(
+            path: "users/\(uid)/notificationArea",
+            method: "PUT",
+            payload: payload,
+            token: authToken
+        )
     }
 
     // MARK: - Joining events

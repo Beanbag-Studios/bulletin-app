@@ -15,6 +15,15 @@ xcuserdata/
 .build/
 Package.resolved
 
+# Cloud Functions
+functions/node_modules/
+functions/.env
+functions/.env.*
+
+# APNs credentials must never be committed
+*.p8
+*.p12
+
 # Fastlane
 fastlane/report.xml
 fastlane/screenshots/

@@ -37,7 +37,12 @@ struct AuthView: View {
                     VStack(spacing: 8) {
                         Label("Signed in as \(em)", systemImage: "checkmark.circle.fill")
                             .font(.caption.weight(.semibold)).foregroundStyle(.green)
-                        Button("Sign Out", role: .destructive) { fb.signOut() }
+                        Button("Sign Out", role: .destructive) {
+                            Task {
+                                await NotificationManager.shared.unregisterFromAccount()
+                                fb.signOut()
+                            }
+                        }
                             .font(.caption.weight(.semibold))
                     }
                     .padding(.bottom, 12)

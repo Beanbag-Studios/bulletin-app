@@ -6,6 +6,7 @@ struct SettingsView: View {
     @StateObject private var fb = FirebaseManager.shared
     @StateObject private var loc = LocationManager.shared
     @StateObject private var friends = FriendsManager.shared
+    @StateObject private var notifications = NotificationManager.shared
 
     @State private var isDeleting = false
     @State private var activeSheet: SettingsSheet?
@@ -128,6 +129,39 @@ struct SettingsView: View {
                     Text("Bulletin matches your contacts' email addresses and phone numbers on this device to show when friends are going. Your address book is never uploaded, and other people never see your number.")
                 }
 
+                Section {
+                    HStack {
+                        Label("Friend events", systemImage: "bell")
+                        Spacer()
+                        Text(notifications.authorizationLabel)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    switch notifications.authorizationStatus {
+                    case .notDetermined:
+                        Button {
+                            Task {
+                                await notifications.requestAuthorizationIfNeeded()
+                                notifications.syncTokenWithAccount()
+                            }
+                        } label: {
+                            Label("Enable notifications", systemImage: "bell.badge")
+                        }
+                    case .denied:
+                        Button {
+                            openSettings()
+                        } label: {
+                            Label("Open Settings", systemImage: "gearshape")
+                        }
+                    default:
+                        EmptyView()
+                    }
+                } header: {
+                    Text("Notifications")
+                } footer: {
+                    Text("Get an alert when a friend posts an event near you. You can change this anytime in iOS Settings.")
+                }
+
                 Section("Saved Locations") {
                     if loc.savedLocations.isEmpty {
                         Text("No saved locations yet.")
@@ -208,7 +242,10 @@ struct SettingsView: View {
 
                 Section {
                     Button(role: .destructive) {
-                        fb.signOut()
+                        Task {
+                            await notifications.unregisterFromAccount()
+                            fb.signOut()
+                        }
                     } label: {
                         Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
                     }
@@ -284,6 +321,7 @@ struct SettingsView: View {
             .onChange(of: fb.isSignedIn) { _, signedIn in
                 if !signedIn { dismiss() }
             }
+            .task { await notifications.refreshStatus() }
         }
     }
 

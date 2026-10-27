@@ -28,6 +28,20 @@
           ".write": "auth != null && auth.uid == $uid"
         },
 
+        // APNs device tokens and the search area used by the push sender. Only
+        // the owner can read or write these; Cloud Functions bypass rules.
+        "pushTokens": {
+          ".read": "auth != null && auth.uid == $uid",
+          ".write": "auth != null && auth.uid == $uid",
+          "$token": {
+            ".validate": "newData.hasChildren(['token','environment'])"
+          }
+        },
+        "notificationArea": {
+          ".read": "auth != null && auth.uid == $uid",
+          ".write": "auth != null && auth.uid == $uid"
+        },
+
         // 3) PRIVATE — ONLY the owner can read/write
         "private": {
           ".read": "auth != null && auth.uid == $uid",
@@ -63,6 +77,18 @@
           ".write": "auth != null && root.child('events').child($eventId).child('creatorUid').val() == auth.uid",
           "$uid": {
             ".write": "auth != null && auth.uid == $uid"
+          }
+        }
+      },
+      // One entry per recipient: the account IDs of friends they matched.
+      // The push sender reads this with admin privileges to find everyone who
+      // should hear about a friend's new event.
+      "friendSubscriptions": {
+        "$uid": {
+          ".read": "auth != null && auth.uid == $uid",
+          ".write": "auth != null && auth.uid == $uid",
+          "$friendUid": {
+            ".validate": "newData.isBoolean()"
           }
         }
       }
